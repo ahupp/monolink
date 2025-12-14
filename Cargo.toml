@@ -1,0 +1,15 @@
+[package]
+name = "monolink"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.19", features = ["derive"] }
+anyhow = "1.0.100"
+ruff_python_ast = { git = "https://github.com/astral-sh/ruff", branch = "main", version = "0.0.0" }
+ruff_python_parser = { git = "https://github.com/astral-sh/ruff", branch = "main", version = "0.0.0" }
+toml = "0.8.19"
+
+[dev-dependencies]
+assert_cmd = "2.0.16"
+tempfile = "3.10.1"
