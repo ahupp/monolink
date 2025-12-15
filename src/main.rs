@@ -36,6 +36,7 @@ fn main() -> Result<()> {
     let mut imports = BTreeSet::new();
     let mut visited_modules = HashSet::new();
     let mut queue = VecDeque::from([module]);
+    let mut monolink_files = BTreeSet::new();
 
     while let Some(current_module) = queue.pop_front() {
         if !visited_modules.insert(current_module.clone()) {
@@ -83,6 +84,8 @@ fn main() -> Result<()> {
         };
         collector.visit_body(&parsed.syntax().body);
 
+        record_monolink_files(&source_root, &context.package_path, &mut monolink_files);
+
         for next in next_modules {
             if !visited_modules.contains(&next) {
                 queue.push_back(next);
@@ -92,6 +95,20 @@ fn main() -> Result<()> {
 
     for import in &imports {
         println!("{import}");
+    }
+
+    let mut dependencies = BTreeSet::new();
+    for path in monolink_files {
+        for dependency in load_monolink(&path)? {
+            dependencies.insert(dependency);
+        }
+    }
+
+    if !dependencies.is_empty() {
+        println!();
+        for dependency in dependencies {
+            println!("{dependency}");
+        }
     }
 
     Ok(())
@@ -246,6 +263,61 @@ fn module_context(project_root: &Path, path: &Path) -> Result<ModuleContext> {
     };
 
     Ok(ModuleContext { package_path })
+}
+
+fn record_monolink_files(
+    source_root: &Path,
+    package_path: &[String],
+    monolink_files: &mut BTreeSet<PathBuf>,
+) {
+    let mut current = source_root.to_path_buf();
+    for component in package_path {
+        current.push(component);
+        let candidate = current.join("monolink.toml");
+        if candidate.is_file() {
+            monolink_files.insert(candidate);
+        }
+    }
+}
+
+fn load_monolink(path: &Path) -> Result<Vec<String>> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+
+    let value: Value = contents
+        .parse()
+        .with_context(|| format!("Failed to parse {}", path.display()))?;
+
+    let table = value
+        .as_table()
+        .ok_or_else(|| anyhow::anyhow!("monolink.toml must be a TOML table"))?;
+
+    for key in table.keys() {
+        if key != "dependencies" {
+            bail!("Unsupported key '{key}' in {}", path.display());
+        }
+    }
+
+    let dependencies = match table.get("dependencies") {
+        Some(value) => {
+            let deps = value
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("[dependencies] must be an array"))?;
+
+            let mut parsed = Vec::new();
+            for item in deps {
+                parsed.push(
+                    item.as_str()
+                        .ok_or_else(|| anyhow::anyhow!("dependencies entries must be strings"))?
+                        .to_string(),
+                );
+            }
+            parsed
+        }
+        None => Vec::new(),
+    };
+
+    Ok(dependencies)
 }
 
 struct ImportCollector<'a> {
