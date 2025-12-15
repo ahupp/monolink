@@ -81,3 +81,26 @@ fn collects_monolink_dependencies_across_packages() {
         ]
     );
 }
+
+#[test]
+fn recursively_collects_descendants_when_entry_is_package() {
+    let assert = Command::new(env!("CARGO_BIN_EXE_monolink"))
+        .arg(fixture("package_arg"))
+        .arg("demo")
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let imports: Vec<&str> = stdout.lines().collect();
+
+    assert_eq!(
+        imports,
+        vec![
+            "demo.a",
+            "demo.subpkg",
+            "demo.subpkg.b",
+            "demo.subpkg.nested",
+            "demo.subpkg.nested.c",
+        ]
+    );
+}

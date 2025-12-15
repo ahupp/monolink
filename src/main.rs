@@ -35,7 +35,7 @@ fn main() -> Result<()> {
 
     let mut imports = BTreeSet::new();
     let mut visited_modules = HashSet::new();
-    let mut queue = VecDeque::from([module]);
+    let mut queue = VecDeque::from([module.clone()]);
     let mut monolink_files = BTreeSet::new();
 
     while let Some(current_module) = queue.pop_front() {
@@ -58,6 +58,24 @@ fn main() -> Result<()> {
                 continue;
             }
         };
+
+        if current_module == module && path.file_name().is_some_and(|name| name == "__init__.py") {
+            if let Some(package_dir) = path.parent() {
+                match collect_descendants(package_dir, &context.package_path) {
+                    Ok(descendants) => {
+                        for descendant in descendants {
+                            if descendant != current_module {
+                                if !visited_modules.contains(&descendant) {
+                                    queue.push_back(descendant.clone());
+                                }
+                                imports.insert(descendant);
+                            }
+                        }
+                    }
+                    Err(err) => eprintln!("Skipping {} descendants: {err}", current_module),
+                }
+            }
+        }
 
         let source = match fs::read_to_string(&path) {
             Ok(source) => source,
@@ -208,6 +226,44 @@ fn module_file_path(source_roots: &[PathBuf], module: &str) -> Option<(PathBuf, 
     }
 
     None
+}
+
+fn collect_descendants(package_dir: &Path, package_path: &[String]) -> Result<Vec<String>> {
+    let mut to_visit = VecDeque::from([(package_dir.to_path_buf(), package_path.to_vec())]);
+    let mut modules = Vec::new();
+
+    while let Some((dir, components)) = to_visit.pop_front() {
+        let entries = fs::read_dir(&dir)
+            .with_context(|| format!("Failed to read directory {}", dir.display()))?;
+
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_dir() {
+                let mut subcomponents = components.clone();
+                subcomponents.push(entry.file_name().to_string_lossy().into_owned());
+
+                if path.join("__init__.py").is_file() {
+                    modules.push(subcomponents.join("."));
+                    to_visit.push_back((path, subcomponents));
+                }
+            } else if path
+                .extension()
+                .map(|ext| ext == "py")
+                .unwrap_or(false)
+                && path
+                    .file_stem()
+                    .is_some_and(|stem| stem != "__init__")
+            {
+                let mut module_components = components.clone();
+                module_components.push(path.file_stem().unwrap().to_string_lossy().into_owned());
+                modules.push(module_components.join("."));
+            }
+        }
+    }
+
+    Ok(modules)
 }
 
 struct ModuleContext {
